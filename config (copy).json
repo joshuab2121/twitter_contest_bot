@@ -1,0 +1,49 @@
+{
+        "search-queries": [
+                "rt2win",
+                "rttowin",
+                "rt 2 win",
+                "retweet to win",
+                "giveaway",
+                "#giveaway",
+                "Retweet and win",
+                "retweet and you could win",
+                "rt for your chance to win",
+                "#giveawayalert",
+                "win rt"
+        ],
+        "banned": [
+                "bot",
+                "spot",
+                "lvbroadcasting",
+                "jflessauSpam",
+                "bryster125",
+                "MobileTekReview",
+                "ilove70315673",
+                "followandrt2win",
+                "traunte",
+                "ericsonabby",
+                "_aekkaphon"
+        ],
+        "follow-keywords": [
+                "follow",
+                "follower",
+                "following"
+        ],
+        "fav-keywords": [
+                "fav",
+                "favorite"
+        ],
+        "rate-limit-update-time": 99,
+        "scan-update-time": 99,
+        "retweet-update-time": 99,
+        "min-ratelimit":20,
+        "min-ratelimit-retweet":99,
+        "min-ratelimit-search":99,
+        "consumer-key": "",
+        "consumer-secret": "",
+        "access-token-key": "",
+        "access-token-secret": "",
+        "username-or-email": "",
+        "password": ""
+}
