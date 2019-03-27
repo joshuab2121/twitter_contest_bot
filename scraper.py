@@ -2,8 +2,6 @@
 import time
 import threading
 import sys
-# import requests
-# import re
 import json
 import os.path
 # ---Import needed modules from Twitter
@@ -12,6 +10,7 @@ from TwitterAPI import TwitterAPI
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 # from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 # ---Import needed modules from Beautiful Soup
 from bs4 import BeautifulSoup
@@ -35,15 +34,20 @@ min_ratelimit_retweet = data["min-ratelimit-retweet"]
 username_or_email = data["username-or-email"]
 password = data["password"]
 bannedusers = data["banned"]
-# End loaded data from config file
+follow_keywords = data["follow-keywords"]
+fav_keywords = data["fav-keywords"]
+# End l oaded data from config file
 
 base_url = 'https://twitter.com/'
 query_string = 'search?q='
 login_path = 'login'
 loginError = "The username and password you entered did not match Twitter's records.  " + \
     "Please double-check and try again."
-# ---selenium command
-browser = webdriver.Chrome()
+# ---selenium commands
+chrome_options = Options()
+chrome_options.add_argument("--headless")
+browser = webdriver.Chrome(options=chrome_options)
+# browser = webdriver.Chrome()
 auth = OAuth1(consumer_key, consumer_secret, access_token_key, access_token_secret)
 
 # --- TwitterAPI OAuth command
@@ -52,24 +56,25 @@ api = TwitterAPI(consumer_key, consumer_secret, access_token_key,
 post_list = list()
 ignore_list = list()
 ratelimit = [999, 999, 100]  # [limit,remaining,percent]
-count = 1
-
-if os.path.isfile('ignorelist'):
-    print("Loading ignore list")
-    with open('ignorelist') as f:
-        ignore_list = f.read().splitlines()
-    f.close()
+count = 0
 
 
 # --- Print and log the tetxt
 def LogAndPrint(text):
     tmp = str(text)
-    tmp = text.replace("\n", "")
+    # tmp = text.replace("\n", "")
     print(tmp)
     f_log = open(file='log', mode='a', encoding='utf-8')
     f_log.write(tmp + "\n")
     f_log.close()
 # end LogAndPrint(text)
+
+
+if os.path.isfile('ignorelist'):
+    LogAndPrint("Loading ignore list")
+    with open('ignorelist') as f:
+        ignore_list = f.read().splitlines()
+    f.close()
 
 
 def CheckError(r):
@@ -106,12 +111,14 @@ def Login():
 
 # --- check if user is a bot hunter
 def is_user_bot_hunter(username):
+    for i in bannedusers:
+        if username in i:
+            return True
     username = username.replace("0", "o").lower()
     for i in bannedusers:
-        if i in username:
+        if username in i:
             return True
-        else:
-            return False
+    return False
 
 
 # --- Run all search queries using Beautiful Soup
@@ -124,8 +131,8 @@ def ScanForContests():
     global ratelimit_search
 
     for search_query in search_queries:
-
-        print("Getting new results for: " + search_query)
+        search_query_result_count = 0
+        LogAndPrint("Getting new results for: " + search_query)
 
         url = (base_url + query_string + search_query)
 
@@ -145,44 +152,111 @@ def ScanForContests():
         # ---soup commands
         data = browser.page_source.encode("utf-8")
         soup = BeautifulSoup(data, 'html.parser', from_encoding='utf-8')
-
         for details in soup.find_all(
                 'div', attrs={'class': 'js-actionable-tweet'}):
             try:
                 user_id = str(details['data-user-id'])
                 tweet_id = str(details['data-tweet-id'])
                 data_name = details['data-name']
-                print('USERNAMEUSERNAME:' + user_id)
+
                 if user_id not in ignore_list and\
                         tweet_id not in ignore_list and\
-                        is_user_bot_hunter(data_name) is False:
-                    div = details.find('div', {'class': 'content'})
-                    tweet_text = str(div.find('div', {
-                        'class': 'js-tweet-text-container'
-                    }).text.strip())
-                    user_name = str(details['data-screen-name'])
-                    print('*********************')
-                    # .format(user_name, user_id, tweet_id, tweet_text))
-                    print(f'{user_name}\nUser ID: {user_id}')
-                    print(f'Tweet ID: {tweet_id}\nTweet: {tweet_text}')
+                        not is_user_bot_hunter(data_name):
+
+                    post_list.append(details)
                     f_ign = open('ignorelist', 'a')
                     ignore_list.append(tweet_id)
+                    f_ign.write(tweet_id + "\n")
                     f_ign.close()
-                    api.request('statuses/retweet/:' + tweet_id)
-                count += 1
+                    search_query_result_count += 1
             except KeyError as e:
-                print('Error extracting ' + str(e) + ' data from class:')
-                print('*********************************')
-                print(json.dumps(details.attrs, indent=4, sort_keys=True))
+                LogAndPrint('Error extracting ' + str(e) + ' data from class:')
+                LogAndPrint('*********************************')
+                LogAndPrint(json.dumps(details.attrs, indent=4, sort_keys=True))
                 SystemExit()
         # end for details in soup.find_all(...)
-        print('Total found: ' + str(count))
+        count = count + search_query_result_count
+        if search_query_result_count == 1:
+            LogAndPrint(str(search_query_result_count) + ' entry found')
+        else:
+            LogAndPrint(str(search_query_result_count) + ' entries found')
+
+    LogAndPrint('Total found: ' + str(count))
     # end for search_query in search_queries
 # end ScanForContests
+
+
+def UpdateQueue():
+    u = threading.Timer(retweet_update_time, UpdateQueue)
+    u.daemon = True
+    u.start()
+
+    global count
+
+    LogAndPrint("******** GETTING READY TO RETWEET ***********")
+    LogAndPrint("******** Queue length: " + str(len(post_list)))
+    while(len(post_list) > 0):
+        details = post_list[0]
+        div = details.find('div', {'class': 'content'})
+        tweet_text = str(div.find('div', {
+            'class': 'js-tweet-text-container'}).text.strip())
+        user_name = str(details['data-screen-name'])
+        user_id = str(details['data-user-id'])
+        tweet_id = str(details['data-tweet-id'])
+        LogAndPrint(f'{user_name}\nUser ID: {user_id}')
+        LogAndPrint(f'Tweet ID: {tweet_id}\nTweet: {tweet_text}')
+
+        CheckForFollowRequest(details)
+        CheckForFavoriteRequest(details)
+
+        r = api.request('statuses/retweet/:' + tweet_id)
+        CheckError(r)
+        post_list.pop(0)
+        count -= 1
+
+
+def CheckForFollowRequest(item):
+    div = item.find('div', {'class': 'content'})
+    tweet_text = str(div.find('div', {
+        'class': 'js-tweet-text-container'}).text.strip())
+    user_name = str(item['data-screen-name'])
+
+    if any(x in tweet_text.lower() for x in follow_keywords):
+        try:
+            r = api.request(
+                'friendships/create', {'screen_name': user_name})
+            CheckError(r)
+            LogAndPrint("Follow: " + user_name)
+        except KeyError:
+            LogAndPrint("Friendship request error")
+            # screen_name = str(item['data-screen-name'])
+            # r = api.request('friendships/create',
+            #                 {'screen_name': screen_name})
+            # CheckError(r)
+            # LogAndPrint("Follow: " + screen_name)
+
+
+def CheckForFavoriteRequest(item):
+    div = item.find('div', {'class': 'content'})
+    tweet_text = str(div.find('div', {
+        'class': 'js-tweet-text-container'}).text.strip())
+    tweet_id = str(item['data-tweet-id'])
+
+    if any(x in tweet_text.lower() for x in fav_keywords):
+        try:
+            r = api.request('favorites/create', {'id': tweet_id})
+            CheckError(r)
+            LogAndPrint("Favorite: " + tweet_id)
+        except KeyError:
+            LogAndPrint("Favorite Error")
+            # r = api.request('favorites/create', {'id': item['id']})
+            # CheckError(r)
+            # LogAndPrint("Favorite: " + str(item['id']))
 
 
 Login()
 # CheckRateLimit()
 while (True):
     ScanForContests()
+    UpdateQueue()
     time.sleep(3600)
